@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="4dp">
+        <Button android:id="@+id/btnOpen" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Buka" />
+        <Button android:id="@+id/btnUndo" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Undo" />
+        <Button android:id="@+id/btnReset" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Reset" />
+        <Button android:id="@+id/btnSave" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Simpan" />
+    </LinearLayout>
+
+    <com.example.bgremover.EditorView
+        android:id="@+id/editor"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="#222222" />
+
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scrollbars="none">
+        <RadioGroup
+            android:id="@+id/modeGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="4dp">
+            <RadioButton android:id="@+id/rbErase" android:layout_width="wrap_content" android:layout_height="wrap_content" android:checked="true" android:text="Hapus" />
+            <RadioButton android:id="@+id/rbRestore" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Pulihkan" />
+            <RadioButton android:id="@+id/rbLasso" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Lasso" />
+            <RadioButton android:id="@+id/rbWand" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Tongkat" />
+            <RadioButton android:id="@+id/rbPan" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Geser" />
+        </RadioGroup>
+    </HorizontalScrollView>
+
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingStart="12dp" android:text="Ukuran kuas" />
+    <SeekBar android:id="@+id/seekSize" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="120" android:progress="30" />
+
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingStart="12dp" android:text="Toleransi tongkat" />
+    <SeekBar android:id="@+id/seekTol" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="25" />
+
+    <CheckBox android:id="@+id/chkKeep" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:text="Lasso: simpan bagian dalam (hapus luar)" />
+</LinearLayout>

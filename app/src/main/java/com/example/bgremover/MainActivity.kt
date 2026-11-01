@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.RadioGroup
@@ -29,6 +30,15 @@ class MainActivity : AppCompatActivity() {
         editor = findViewById(R.id.editor)
         val density = resources.displayMetrics.density
 
+        val lassoBar = findViewById<View>(R.id.lassoBar)
+        val pinTools = findViewById<View>(R.id.pinTools)
+        fun refreshBars() {
+            val lasso = editor.mode == EditorView.Mode.LASSO
+            lassoBar.visibility = if (lasso) View.VISIBLE else View.GONE
+            val pins = lasso && editor.lassoType == EditorView.LassoType.PINS
+            pinTools.visibility = if (pins) View.VISIBLE else View.GONE
+        }
+
         findViewById<Button>(R.id.btnOpen).setOnClickListener { picker.launch("image/*") }
         findViewById<Button>(R.id.btnUndo).setOnClickListener { editor.undo() }
         findViewById<Button>(R.id.btnReset).setOnClickListener { editor.resetImage() }
@@ -42,6 +52,7 @@ class MainActivity : AppCompatActivity() {
                 R.id.rbPan -> EditorView.Mode.PAN
                 else -> EditorView.Mode.ERASE
             }
+            refreshBars()
         }
 
         val seekSize = findViewById<SeekBar>(R.id.seekSize)
@@ -54,6 +65,26 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<CheckBox>(R.id.chkKeep).setOnCheckedChangeListener { _, checked ->
             editor.lassoKeepInside = checked
+        }
+
+        findViewById<RadioGroup>(R.id.lassoType).setOnCheckedChangeListener { _, id ->
+            val pins = id == R.id.rbPins
+            editor.lassoType = if (pins) EditorView.LassoType.PINS else EditorView.LassoType.DRAG
+            refreshBars()
+            if (pins) {
+                Toast.makeText(
+                    this,
+                    "Tap untuk pasang jarum, tap jarum untuk menggeser. Lalu tekan Hapus.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+        findViewById<Button>(R.id.btnPinUndo).setOnClickListener { editor.undoPin() }
+        findViewById<Button>(R.id.btnPinCancel).setOnClickListener { editor.cancelPins() }
+        findViewById<Button>(R.id.btnPinApply).setOnClickListener {
+            if (!editor.applyPins()) {
+                Toast.makeText(this, "Pasang minimal 3 jarum", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 

@@ -17,6 +17,7 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.min
 
 class EditorView @JvmOverloads constructor(
@@ -25,11 +26,18 @@ class EditorView @JvmOverloads constructor(
 ) : View(context, attrs) {
 
     enum class Mode { ERASE, RESTORE, LASSO, WAND, PAN }
+    enum class LassoType { DRAG, PINS }
 
     var mode = Mode.ERASE
-    var brushSize = 40f          // dalam px layar
+        set(v) { field = v; resetTransient(); invalidate() }
+    var lassoType = LassoType.DRAG
+        set(v) { field = v; resetTransient(); invalidate() }
+
+    var brushSize = 40f          // px layar
     var tolerance = 25           // 0..100
     var lassoKeepInside = false
+
+    private val dp = resources.displayMetrics.density
 
     private var original: Bitmap? = null
     private var work: Bitmap? = null
@@ -59,17 +67,46 @@ class EditorView @JvmOverloads constructor(
     private val lassoLine = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         color = Color.CYAN
-        strokeWidth = 4f
-        pathEffect = DashPathEffect(floatArrayOf(18f, 10f), 0f)
+    }
+    private val closeLine = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = Color.argb(200, 255, 255, 0)
+        pathEffect = DashPathEffect(floatArrayOf(16f, 12f), 0f)
+    }
+    private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.WHITE
     }
     private val cursorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         color = Color.RED
-        strokeWidth = 3f
     }
+    private val loupeBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = Color.WHITE
+    }
+    private val loupeShadow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = Color.BLACK
+    }
+    private val crossPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = Color.MAGENTA
+    }
+    private val loupePath = Path()
 
+    // lasso tarik
     private val lassoScreen = Path()
     private val lassoImage = Path()
+    private var lassoCount = 0
+    private var startX = 0f
+    private var startY = 0f
+
+    // lasso jarum (koordinat gambar)
+    private val pins = ArrayList<FloatArray>()
+    private var placing = false
+    private var dragPin = -1
 
     private var lastX = 0f
     private var lastY = 0f
@@ -114,6 +151,7 @@ class EditorView @JvmOverloads constructor(
         workCanvas = Canvas(w)
         restorePaint.shader = BitmapShader(o, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
         undoStack.clear()
+        resetTransient()
         fit()
     }
 
@@ -135,7 +173,43 @@ class EditorView @JvmOverloads constructor(
         invalidate()
     }
 
+    // --- jarum ---
+    fun undoPin() {
+        if (pins.isNotEmpty()) {
+            pins.removeAt(pins.size - 1)
+            invalidate()
+        }
+    }
+
+    fun cancelPins() {
+        pins.clear()
+        invalidate()
+    }
+
+    /** Hubungkan semua jarum jadi lasso tertutup lalu hapus. false = jarum kurang dari 3. */
+    fun applyPins(): Boolean {
+        if (pins.size < 3 || work == null) return false
+        val path = Path()
+        pins.forEachIndexed { i, p -> if (i == 0) path.moveTo(p[0], p[1]) else path.lineTo(p[0], p[1]) }
+        path.close()
+        applyLasso(path)
+        pins.clear()
+        invalidate()
+        return true
+    }
+
     // ---------- util ----------
+
+    private fun resetTransient() {
+        lassoScreen.reset()
+        lassoImage.reset()
+        lassoCount = 0
+        pins.clear()
+        drawing = false
+        placing = false
+        dragPin = -1
+        touchX = -1f
+    }
 
     private fun scaleNow(): Float {
         val v = FloatArray(9)
@@ -148,6 +222,12 @@ class EditorView @JvmOverloads constructor(
         val pts = floatArrayOf(x, y)
         inv.mapPoints(pts)
         return pts
+    }
+
+    private fun toScreen(p: FloatArray): FloatArray {
+        val r = floatArrayOf(p[0], p[1])
+        matrix.mapPoints(r)
+        return r
     }
 
     private fun fit() {
@@ -171,26 +251,122 @@ class EditorView @JvmOverloads constructor(
         if (undoStack.size > 6) undoStack.removeFirst().recycle()
     }
 
+    private fun applyLasso(path: Path) {
+        pushUndo()
+        path.fillType = if (lassoKeepInside) Path.FillType.INVERSE_EVEN_ODD else Path.FillType.EVEN_ODD
+        workCanvas?.drawPath(path, lassoFill)
+    }
+
     private fun brushPaint(): Paint {
         val p = if (mode == Mode.ERASE) erasePaint else restorePaint
         p.strokeWidth = brushSize / scaleNow()
         return p
     }
 
+    private fun hitPin(x: Float, y: Float): Int {
+        var best = -1
+        var bd = 28f * dp
+        pins.forEachIndexed { i, p ->
+            val s = toScreen(p)
+            val d = hypot(s[0] - x, s[1] - y)
+            if (d < bd) { bd = d; best = i }
+        }
+        return best
+    }
+
     // ---------- gambar ----------
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        if (work == null) return
+        drawContent(canvas, 1f)
+        if (touchX >= 0 && mode != Mode.PAN) drawLoupe(canvas)
+    }
+
+    /** k = faktor pengecil ketebalan garis (dipakai di dalam loupe agar garis tetap tipis). */
+    private fun drawContent(canvas: Canvas, k: Float) {
         val w = work ?: return
         canvas.save()
         canvas.concat(matrix)
         canvas.drawRect(0f, 0f, w.width.toFloat(), w.height.toFloat(), checkerPaint)
         canvas.restore()
         canvas.drawBitmap(w, matrix, bmpPaint)
-        if (mode == Mode.LASSO && drawing) canvas.drawPath(lassoScreen, lassoLine)
+
+        if (mode == Mode.LASSO) {
+            if (lassoType == LassoType.DRAG) {
+                if (drawing && lassoCount > 0) {
+                    lassoLine.strokeWidth = 2.5f * dp * k
+                    closeLine.strokeWidth = 1.5f * dp * k
+                    canvas.drawPath(lassoScreen, lassoLine)
+                    canvas.drawLine(touchX, touchY, startX, startY, closeLine)
+                }
+            } else {
+                drawPins(canvas, k)
+            }
+        }
         if (touchX >= 0 && (mode == Mode.ERASE || mode == Mode.RESTORE)) {
+            cursorPaint.strokeWidth = 2f * dp * k
             canvas.drawCircle(touchX, touchY, brushSize / 2f, cursorPaint)
         }
+    }
+
+    private fun drawPins(canvas: Canvas, k: Float) {
+        val pts = pins.map { toScreen(it) }
+        if (pts.isEmpty()) return
+        val preview = placing && touchX >= 0
+
+        val path = Path()
+        pts.forEachIndexed { i, p -> if (i == 0) path.moveTo(p[0], p[1]) else path.lineTo(p[0], p[1]) }
+        if (preview) path.lineTo(touchX, touchY)
+        lassoLine.strokeWidth = 2.5f * dp * k
+        canvas.drawPath(path, lassoLine)
+
+        val last = if (preview) floatArrayOf(touchX, touchY) else pts.last()
+        if (pts.size >= 2 || preview) {
+            closeLine.strokeWidth = 1.5f * dp * k
+            canvas.drawLine(last[0], last[1], pts[0][0], pts[0][1], closeLine)
+        }
+
+        ringPaint.strokeWidth = 2f * dp * k
+        pts.forEachIndexed { i, p ->
+            ringPaint.color = if (i == 0) Color.GREEN else Color.RED
+            canvas.drawCircle(p[0], p[1], (if (i == 0) 9f else 7f) * dp * k, ringPaint)
+            canvas.drawCircle(p[0], p[1], 1.5f * dp * k, dotPaint)
+        }
+    }
+
+    private fun drawLoupe(canvas: Canvas) {
+        val size = 130f * dp
+        val m = 10f * dp
+        val zoom = 3f
+        var left = width - size - m
+        val top = m
+        // kalau jari dekat pojok kanan atas, pindahkan loupe ke kiri
+        if (touchX > left - m && touchY < top + size + m * 2) left = m
+        val cx = left + size / 2f
+        val cy = top + size / 2f
+        val r = size / 2f
+
+        canvas.save()
+        loupePath.reset()
+        loupePath.addCircle(cx, cy, r, Path.Direction.CW)
+        canvas.clipPath(loupePath)
+        canvas.drawColor(Color.rgb(34, 34, 34))
+        canvas.translate(cx, cy)
+        canvas.scale(zoom, zoom)
+        canvas.translate(-touchX, -touchY)
+        drawContent(canvas, 1f / zoom)
+        canvas.restore()
+
+        loupeShadow.strokeWidth = 5f * dp
+        canvas.drawCircle(cx, cy, r, loupeShadow)
+        loupeBorder.strokeWidth = 3f * dp
+        canvas.drawCircle(cx, cy, r, loupeBorder)
+
+        crossPaint.strokeWidth = 1f * dp
+        val a = 8f * dp
+        canvas.drawLine(cx - a, cy, cx + a, cy, crossPaint)
+        canvas.drawLine(cx, cy - a, cx, cy + a, crossPaint)
     }
 
     // ---------- sentuhan ----------
@@ -206,6 +382,7 @@ class EditorView @JvmOverloads constructor(
             MotionEvent.ACTION_POINTER_DOWN -> {
                 cancelAction()
                 ignore = true
+                touchX = -1f
                 lastFx = (e.getX(0) + e.getX(1)) / 2f
                 lastFy = (e.getY(0) + e.getY(1)) / 2f
             }
@@ -249,10 +426,18 @@ class EditorView @JvmOverloads constructor(
             }
             Mode.LASSO -> {
                 drawing = true
-                lassoScreen.reset()
-                lassoImage.reset()
-                lassoScreen.moveTo(x, y)
-                lassoImage.moveTo(p[0], p[1])
+                if (lassoType == LassoType.DRAG) {
+                    lassoScreen.reset()
+                    lassoImage.reset()
+                    lassoScreen.moveTo(x, y)
+                    lassoImage.moveTo(p[0], p[1])
+                    lassoCount = 1
+                    startX = x
+                    startY = y
+                } else {
+                    val idx = hitPin(x, y)
+                    if (idx >= 0) dragPin = idx else placing = true
+                }
             }
             Mode.PAN -> {
                 drawing = true
@@ -277,9 +462,14 @@ class EditorView @JvmOverloads constructor(
             }
             Mode.LASSO -> {
                 if (!drawing) return
-                val p = toImage(x, y)
-                lassoScreen.lineTo(x, y)
-                lassoImage.lineTo(p[0], p[1])
+                if (lassoType == LassoType.DRAG) {
+                    val p = toImage(x, y)
+                    lassoScreen.lineTo(x, y)
+                    lassoImage.lineTo(p[0], p[1])
+                    lassoCount++
+                } else if (dragPin >= 0) {
+                    pins[dragPin] = toImage(x, y)
+                }
             }
             Mode.PAN -> {
                 matrix.postTranslate(x - lastX, y - lastY)
@@ -294,14 +484,18 @@ class EditorView @JvmOverloads constructor(
     private fun endAction(x: Float, y: Float) {
         when (mode) {
             Mode.LASSO -> {
-                if (drawing) {
-                    lassoImage.close()
-                    pushUndo()
-                    lassoImage.fillType = if (lassoKeepInside) Path.FillType.INVERSE_EVEN_ODD
-                    else Path.FillType.EVEN_ODD
-                    workCanvas?.drawPath(lassoImage, lassoFill)
+                if (lassoType == LassoType.DRAG) {
+                    if (drawing && lassoCount > 2) {
+                        lassoImage.close()
+                        applyLasso(lassoImage)
+                    }
                     lassoScreen.reset()
                     lassoImage.reset()
+                    lassoCount = 0
+                } else {
+                    if (placing) pins.add(toImage(x, y))
+                    placing = false
+                    dragPin = -1
                 }
             }
             Mode.WAND -> {
@@ -321,6 +515,9 @@ class EditorView @JvmOverloads constructor(
                 Mode.LASSO -> {
                     lassoScreen.reset()
                     lassoImage.reset()
+                    lassoCount = 0
+                    placing = false
+                    dragPin = -1
                 }
                 else -> {}
             }

@@ -41,6 +41,33 @@
         </RadioGroup>
     </HorizontalScrollView>
 
+    <LinearLayout
+        android:id="@+id/lassoBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="4dp"
+        android:visibility="gone">
+        <RadioGroup
+            android:id="@+id/lassoType"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <RadioButton android:id="@+id/rbDrag" android:layout_width="wrap_content" android:layout_height="wrap_content" android:checked="true" android:text="Tarik" />
+            <RadioButton android:id="@+id/rbPins" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Jarum" />
+        </RadioGroup>
+        <LinearLayout
+            android:id="@+id/pinTools"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:visibility="gone">
+            <Button android:id="@+id/btnPinUndo" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Undo jarum" />
+            <Button android:id="@+id/btnPinCancel" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Batal" />
+            <Button android:id="@+id/btnPinApply" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Hapus" />
+        </LinearLayout>
+    </LinearLayout>
+
     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingStart="12dp" android:text="Ukuran kuas" />
     <SeekBar android:id="@+id/seekSize" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="120" android:progress="30" />
 
